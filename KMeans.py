@@ -94,27 +94,35 @@ def window_clusters(clusters, j, n_clusters=3 ):
                 cluster_ventana[k].append(i)
     return cluster_ventana
 
-def subconjunto(clusters_ventana, k_esimo, j, n_clusters=3):
-    a=set(clusters_ventana[0][k_esimo])
-    b=list()
-    c=list()
-    subset=set()
-    multiplicidad_freq=list()
+def frecuencia(clusters_ventana, n_clusters=3):
+    a=np.empty([1,n_clusters], dtype=set) #Clusters de la ventana 0.
+    a=a[0]
+    b=np.empty([n_clusters, len(clusters_ventana)-1], dtype=set) #No se toma en cuenta la ventana 0 (esa esta en a).
+    c=np.empty([n_clusters,len(clusters_ventana)-1,n_clusters], dtype=set) #No se toma en cuenta la ventana 0.
+    f=np.empty([n_clusters,len(clusters_ventana)-1,n_clusters]) #Matriz de frecuencias.
     for k in xrange(n_clusters):
-        b.append(set(clusters_ventana[j][k]))
-        c.append(a&b[k])
-        if len(c[k])>len(subset):
-            subset=c[k]
-        elif len(c[k])==len(subset) and k>0:
-            multiplicidad_freq.append(c[k])
-            print(j-1)
-    return subset, multiplicidad_freq
+        a[k]=set(clusters_ventana[0][k])
+    for j in xrange(1,len(clusters_ventana)):
+        for l in xrange(n_clusters):
+            b[l,j-1]=set(clusters_ventana[j][l])
+    for k in xrange(n_clusters):
+        for j in xrange(len(clusters_ventana)-1):
+            for l in xrange(n_clusters):
+                c[k,j,l]=a[k]&b[l,j]
+    for k in xrange(n_clusters):
+        for j in xrange(len(clusters_ventana)-1):
+            for l in xrange(n_clusters):
+                f[k,j,l]=len(c[k,j,l])
 
-def window_subset(k_ventana, k, n_clusters=3):
-    subset_ventana=list()
-    for j in xrange(1,len(k_ventana)):
-        subset_ventana.append(subconjunto(k_ventana,k,j,n_clusters))
-    return subset_ventana
+    freq_indexes=[ [] for i in repeat(None,n_clusters)]
+    for k in xrange(n_clusters):
+        for j in xrange(len(clusters_ventana)-1):
+            thing=np.argwhere(f[k,j]==np.amax(f[k,j]))
+            another_thing=list()
+            for equis in xrange(len(thing)):
+                another_thing.append(thing[equis][0])
+            freq_indexes[k].append(another_thing)
+    return freq_indexes
 
 precios=pd.read_excel('OPIIFPrecios2.xlsx')
 precios=precios.convert_objects(convert_numeric=True)
@@ -153,46 +161,34 @@ clusters_ventana=list()
 for j in xrange(clusters.shape[1]):
     clusters_ventana.append(window_clusters(clusters,j,n_clusters))
 
-subsets_cluster=list()
-for k in xrange(n_clusters):
-    subsets_cluster.append(window_subset(clusters_ventana,k,n_clusters))
-
-
-
-a=np.empty([1,n_clusters], dtype=set) #Clusters de la ventana 0.
-a=a[0]
-b=np.empty([n_clusters, len(clusters_ventana)-1], dtype=set) #No se toma en cuenta la ventana 0 (esa esta en a).
-c=np.empty([n_clusters,len(clusters_ventana)-1,n_clusters], dtype=set) #No se toma en cuenta la ventana 0.
-f=np.empty([n_clusters,len(clusters_ventana)-1,n_clusters]) #Matriz de frecuencias.
-for k in xrange(n_clusters):
-    a[k]=set(clusters_ventana[0][k])
-for j in xrange(1,len(clusters_ventana)):
-    for l in xrange(n_clusters):
-        b[l,j-1]=set(clusters_ventana[j][l])
-for k in xrange(n_clusters):
+freq=frecuencia(clusters_ventana,n_clusters)
+matriz_freq=np.empty([n_clusters,len(clusters_ventana)-1], dtype=set)
+matriz_len=np.empty([n_clusters,len(clusters_ventana)-1], dtype=set)
+for i in xrange(n_clusters):
     for j in xrange(len(clusters_ventana)-1):
-        for l in xrange(n_clusters):
-            c[k,j,l]=a[0]&b[l,j]
-for k in xrange(n_clusters):
-    for j in xrange(len(clusters_ventana)-1):
-        for l in xrange(n_clusters):
-            f[k,j,l]=len(c[k,j,l])
-
-freq_indexes=[ [] for i in repeat(None,n_clusters)]
-for k in xrange(n_clusters):
-    for j in xrange(len(clusters_ventana)-1):
-        thing=np.argwhere(f[k,j]==np.amax(f[k,j]))
-        another_thing=list()
-        for equis in xrange(len(thing)):
-            another_thing.append(thing[equis][0])
-        freq_indexes[k].append(another_thing)
+        matriz_freq[i,j]=set(freq[i][j])
+        matriz_len[i,j]=len(matriz_freq[i,j])
 
 
+#Errores----------------------------------------------
+#No se eliminan las cosas de la ventana 3.
+#Cuando K=2, no se elimina el k-esimo de la ventana 1.
+
+matriz_freq_original=matriz_freq.copy()
+for j in xrange(len(clusters_ventana)-1):
+    for k in xrange(1,n_clusters):
+        if matriz_len[k,j]>matriz_len[k-1,j]:
+            subset=matriz_freq_original[k,j]&matriz_freq_original[k-1,j]
+            matriz_freq[k,j]=matriz_freq[k,j]-subset
+        elif matriz_len[k,j]<matriz_len[k-1,j]:
+            subset=matriz_freq_original[k,j]&matriz_freq_original[k-1,j]
+            matriz_freq[k-1,j]=matriz_freq[k-1,j]-subset
+        elif matriz_len[k,j]==matriz_len[k-1,j]:
+            subset=matriz_freq_original[k,j]&matriz_freq_original[k-1,j]
+            matriz_freq[k-1,j]=matriz_freq[k-1,j]-subset
+            matriz_freq[k,j]=matriz_freq[k,j]-subset
 
 
-
-#>>> winner = np.argwhere(list == np.amax(list))
-#http://stackoverflow.com/questions/17568612/how-to-make-numpy-argmax-return-all-occurences-of-the-maximum
 
 # error_df.to_csv('errores_3K')
 # clusters.to_csv('KMeans_3K')
