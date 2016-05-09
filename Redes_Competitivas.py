@@ -1,42 +1,18 @@
 __author__ = 'raul'
 
 #Importamos los modulos
-from matplotlib.finance import quotes_historical_yahoo as yahoo #Es de donde se obtienen los datos
-from datetime import date #Aparentemente necesitas este tipo de objeto para yahoo
+from collections import Counter #Para encontrar la moda
 from math import log #Se utiliza para calcular los rendimientos logaritmicos
 from itertools import repeat #Funciona muy bien para inicializar listas de n listas
 import pandas as pd
 import numpy as np
 
-#Se bajan los datos de yahoo finance utilizando matplotlib.finance.quotes_historical_yahoo:
-def download_data(yahoo_ticker, start_date, end_date):
-    yahoo_object=[]
-    for i in xrange(len(yahoo_ticker)):
-        appending_data=yahoo(yahoo_ticker[i], start_date, end_date)
-        yahoo_object.append(appending_data)
-    return yahoo_object
-
-#Se obtiene el rendimiento logaritmico (con respecto al precio de cierre):
-def log_return(yahoo_ticker,yahoo_object):
-    rend_log=[ [] for i in repeat([],len(yahoo_ticker))] #Se crea un arreglo de tamanho [n]*[Null]
-    gregorian_date=[ [] for i in repeat(None,len(yahoo_ticker))]
-    months=[ [] for i in repeat(None,len(yahoo_ticker))]
-    for i in xrange(len(yahoo_ticker)):
-        for j in xrange(1,len(yahoo_object[0])):
-            appending_data=log(yahoo_object[i][j][4]/yahoo_object[i][j-1][4])
-            rend_log[i].append(appending_data)
-            appending_date=date.fromordinal(int(yahoo_object[i][j][0])) #Se cambia la fecha ordinal (gregoriana
-                                                                        # proleptica) a gregoriana
-            gregorian_date[i].append(appending_date)
-            appending_month=appending_date.month
-            months[i].append(appending_month)
-    df_rend_log=pd.DataFrame(rend_log)
-    df_greg_date=pd.DataFrame(gregorian_date)
-    month_df=pd.DataFrame(months)
-    return df_rend_log, df_greg_date, month_df
 
 #Se obtienen las ventanas bursatiles
-def windows(month_df, rend_log, start_date, end_date):
+def windows(df):
+
+    start_date=df.iloc[0][1]
+    end_date=df.iloc[0][df.shape[1]]
     #Se obtienen el numero de ventanas bursatiles
     delta_year=end_date.year-start_date.year
     if delta_year > 1:
@@ -47,67 +23,65 @@ def windows(month_df, rend_log, start_date, end_date):
     #Se obtienen las ventanas bursatiles
     ventana=[]
 
-    sumas=month_df.sum()
     j=0
-    for i in xrange(1,len(sumas)):
-        if sumas[i]>sumas[i-1] or (sumas[i]==1*len(rend_log) and sumas[i-1]==12*len(rend_log)):
-            ventana.append(rend_log.iloc[:len(rend_log),j:i]) #Se debe de hacer con rend_log pero hare la pruena con
-                                                              #month_df
+    for i in xrange(2,df.shape[1]):
+        if df.iloc[0][i].month>df.iloc[0][i-1].month or (df.iloc[0][i].month==1 and df.iloc[0][i-1].month==12):
+            ventana.append(df.iloc[:len(df),j:i])
             j=i
 
     if len(ventana)<num_ventanas:
-        ventana.append(rend_log.iloc[:len(rend_log),j:rend_log.shape[1]])
+        ventana.append(df.iloc[:len(df),j:df.shape[1]])
+
+
+    #Se elimina la fecha para poder hacer el clustering con KMeans
+    for i in xrange(len(ventana)):
+        ventana[i]=ventana[i].drop('Fecha')
+
     return ventana
 
-#Se definen las fechas de inicio y fin
-start_date=date(2014, 1, 1)
-end_date=date(2016, 2, 28)
+# Creamos el df:
+industria=pd.DataFrame(columns=['ticker'])
+csv_file=pd.read_csv('NAICS2.csv')
+industria['ticker']=csv_file['ticker']
+industria['industry']=csv_file['Main Activities']
 
-#Ultimos activos que vimos en su prospecto de inversion:
-yahoo_ticker=['AC.MX', 'ALFAA.MX', 'ALPEKA.MX', 'ALSEA.MX', 'AMXL.MX', 'ASURB.MX', 'BIMBOA.MX', 'BOLSAA.MX',
-        'COMERCIUBC.MX', 'ELEKTRA.MX', 'GAPB.MX', 'GENTERA.MX', 'GFINBURO.MX', 'GFNORTEO.MX', 'GFREGIOO.MX',
-        'GMEXICOB.MX', 'GRUMAB.MX', 'GSANBORB-1.MX', 'ICA.MX', 'ICHB.MX', 'IENOVA.MX', 'KIMBERA.MX', 'KOFL.MX',
-        'LABB.MX', 'LALAB.MX', 'LIVEPOLC-1.MX', 'MEXCHEM.MX', 'OHLMEX.MX', 'PINFRA.MX', 'SANMEXB.MX', 'TLEVISACPO.MX',
-        'WALMEX.MX']
+precios=pd.read_excel('OPIIFPrecios2.xlsx')
+precios=precios.convert_objects(convert_numeric=True)
+precios['Fecha']=pd.to_datetime(precios['Fecha'])
+precios=precios.T
 
-#Creamos el df:
-df=pd.DataFrame(columns=['ticker', 'yahoo_ticker'])
-df['yahoo_ticker']=yahoo_ticker
-csv_file=pd.read_csv('NAICS.csv')
-df['ticker']=csv_file['ticker']
-df['industry']=csv_file['Main Activities']
+df=precios.copy()
+for i in xrange(1,len(precios)):
+    for j in xrange(1,precios.shape[1]):
+        df.iloc[i][j]=log(precios.iloc[i][j]/precios.iloc[i][j-1])
+df=df.drop(0,axis=1)
 
-#Bajamos los datos utilizando yahoo y guardandolos en yahoo_object:
-yahoo_object=download_data(yahoo_ticker, start_date, end_date)
-
-#Se obtiene el rendimiento logaritmico y la fecha ordinal, asi como un dataframe de los meses
-rend_log , gregorian_date, month_df=log_return(yahoo_ticker,yahoo_object)
-
-#Se obtiene una lista con los dataframes separados en ventanas
-ventana=windows(month_df,rend_log,start_date,end_date)
+ventana=windows(df)
 
 #Redes Neuronales Competitivas basandome en el algoritmo que vi con Riemann:
 
 #--------------Entrenamiento------------#
-num_var=list()
+num_activos=ventana[0].shape[0]
 weights=list()
-num_neuronas=5
+num_neuronas=18
 for i in xrange(len(ventana)):
-    num_var.append(ventana[i].shape[1])
-    weights.append(np.random.rand(num_var[i],num_neuronas))
+    weights.append(np.zeros((ventana[i].shape[1], num_neuronas)))
 
-num_datos=ventana[0].shape[0]
+for i in xrange(len(ventana)):
+    mean_weights=ventana[i].mean()
+    for n in xrange(num_neuronas):
+        weights[i][:,n]=mean_weights.values+weights[i][:,n]
 
-epocas=100
-eta0=1
-delta_eta=eta0/epocas
+epocas=500
 
 for epoca in xrange(epocas):
     dist_euclidiana=np.zeros((1,num_neuronas))
-    eta=eta0-delta_eta*(epoca-1)
     for i in xrange(len(ventana)):
+        eta0=ventana[i].mean().mean()
+        delta_eta=eta0/epocas
+        eta=eta0-delta_eta*(epoca-1)
         datos=ventana[i].reindex(columns=np.random.permutation(ventana[i].columns))
-        for j in xrange(num_datos):
+        for j in xrange(num_activos):
             x_vector=datos.iloc[j][:]
             for neurona in xrange(num_neuronas):
                 error=x_vector.values-weights[i][:,neurona]
@@ -119,7 +93,7 @@ for epoca in xrange(epocas):
 #---------Simulacion-----------#
 y_vectors=[ [] for i in repeat(None,len(ventana))]
 for i in xrange(len(ventana)):
-    for j in xrange(num_datos):
+    for j in xrange(num_activos):
         x_vector=ventana[i].iloc[j][:]
         for neurona in xrange(num_neuronas):
             error=x_vector.values-weights[i][:,neurona]
@@ -127,5 +101,17 @@ for i in xrange(len(ventana)):
         dist_euclidiana_list=list(dist_euclidiana[0])
         indice=dist_euclidiana_list.index(min(dist_euclidiana_list))
         y_vectors[i].append(indice)
-# for i in xrange(len(y_vectors)):
-#     print(np.unique(y_vectors[i]))
+clusters=pd.DataFrame(y_vectors)
+clusters=clusters.T
+clusters_moda=list()
+for i in xrange(len(clusters)):
+    temp=Counter(clusters.iloc[i][:])
+    clusters_moda.append(temp.most_common(1))
+    clusters_moda[i]=clusters_moda[i][0][0]
+temp=df
+temp=temp.drop('Fecha')
+temp=temp.drop(xrange(1,df.shape[1]+1),axis=1)
+
+modas=pd.DataFrame(clusters_moda,index=temp.index, columns=['Cluster'])
+modas.to_csv('modas_18n.csv')
+clusters.to_csv('RNC_18n.csv')

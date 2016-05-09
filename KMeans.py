@@ -1,6 +1,7 @@
 __author__ = 'raul'
 
 from math import log #Se utiliza para calcular los rendimientos logaritmicos
+from itertools import repeat
 import pandas as pd
 from sklearn.cluster import KMeans
 import numpy as np
@@ -37,7 +38,7 @@ def windows(df):
     return ventana
 
 def cluster_data(data, n_clusters=8):
-    cluster_model = KMeans(n_clusters)
+    cluster_model = KMeans(n_clusters, n_init=20, max_iter=500)
     prediction = cluster_model.fit_predict(data)
     return prediction, cluster_model
 
@@ -53,7 +54,7 @@ def measure_error(prediction, model, c_data):
 
     return np.average(error_score), len(cluster_counts[cluster_counts==1])
 
-def clustering(ventana, n_clusters=8):
+def clustering(ventana, n_clusters=3):
     error=[]
     failed_clusters=[]
     for i in xrange(len(ventana)):
@@ -73,7 +74,49 @@ def clustering(ventana, n_clusters=8):
     error_df['Failed Cluster']=failed_clusters
     return ventana, error_df
 
-precios=pd.read_excel('OPIIFPrecios.xlsx')
+def clustering_fallidos(ventana, error_df, indices_fallidos, n_clusters=3):
+    for i in indices_fallidos:
+        ventana[i]=ventana[i].drop('Cluster',axis=1)
+        appending_cluster, appending_model = cluster_data(ventana[i],n_clusters)
+        ventana[i]['Cluster']=appending_cluster #Agrego la columna Cluster a la ventana[i]
+
+        appending_error, appending_failed_clusters= measure_error(appending_cluster, appending_model, ventana[i])
+        if appending_error < error_df.iloc[i][0] and appending_failed_clusters < error_df.iloc[i][1]:
+            error_df.iloc[i][0]=appending_error
+            error_df.iloc[i][1]=appending_failed_clusters
+    return ventana, error_df
+
+def window_clusters(clusters, j, n_clusters=3 ):
+    cluster_ventana=[ [] for i in repeat(None,n_clusters) ]
+    for i in xrange(len(clusters)):
+        for k in xrange(n_clusters):
+            if clusters.iloc[i][j]==k:
+                cluster_ventana[k].append(i)
+    return cluster_ventana
+
+def subconjunto(clusters_ventana, k_esimo, j, n_clusters=3):
+    a=set(clusters_ventana[0][k_esimo])
+    b=list()
+    c=list()
+    subset=set()
+    multiplicidad_freq=list()
+    for k in xrange(n_clusters):
+        b.append(set(clusters_ventana[j][k]))
+        c.append(a&b[k])
+        if len(c[k])>len(subset):
+            subset=c[k]
+        elif len(c[k])==len(subset) and k>0:
+            multiplicidad_freq.append(c[k])
+            print(j-1)
+    return subset, multiplicidad_freq
+
+def window_subset(k_ventana, k, n_clusters=3):
+    subset_ventana=list()
+    for j in xrange(1,len(k_ventana)):
+        subset_ventana.append(subconjunto(k_ventana,k,j,n_clusters))
+    return subset_ventana
+
+precios=pd.read_excel('OPIIFPrecios2.xlsx')
 precios=precios.convert_objects(convert_numeric=True)
 precios['Fecha']=pd.to_datetime(precios['Fecha'])
 precios=precios.T
@@ -86,5 +129,70 @@ df=df.drop(0,axis=1)
 
 ventana=windows(df)
 
-n_clusters=5
+n_clusters=3
 ventana, error_df = clustering(ventana,n_clusters)
+
+max_iteraciones=1000
+iteracion=0
+while iteracion < max_iteraciones:
+    indices_fallidos=[]
+    for i in xrange(len(error_df)):
+        if error_df.iloc[i][0] > 20 or error_df.iloc[i][0] < -20 or error_df.iloc[i][1] > 0:
+            indices_fallidos.append(i)
+    iteracion=iteracion+1
+    if indices_fallidos==[]:
+        iteracion=max_iteraciones
+    ventana, error_df=clustering_fallidos(ventana,error_df, indices_fallidos,n_clusters)
+
+frames=list()
+for i in xrange(len(ventana)):
+    frames.append(ventana[i]['Cluster'])
+clusters=pd.concat(frames,axis=1)
+
+clusters_ventana=list()
+for j in xrange(clusters.shape[1]):
+    clusters_ventana.append(window_clusters(clusters,j,n_clusters))
+
+subsets_cluster=list()
+for k in xrange(n_clusters):
+    subsets_cluster.append(window_subset(clusters_ventana,k,n_clusters))
+
+
+
+a=np.empty([1,n_clusters], dtype=set) #Clusters de la ventana 0.
+a=a[0]
+b=np.empty([n_clusters, len(clusters_ventana)-1], dtype=set) #No se toma en cuenta la ventana 0 (esa esta en a).
+c=np.empty([n_clusters,len(clusters_ventana)-1,n_clusters], dtype=set) #No se toma en cuenta la ventana 0.
+f=np.empty([n_clusters,len(clusters_ventana)-1,n_clusters]) #Matriz de frecuencias.
+for k in xrange(n_clusters):
+    a[k]=set(clusters_ventana[0][k])
+for j in xrange(1,len(clusters_ventana)):
+    for l in xrange(n_clusters):
+        b[l,j-1]=set(clusters_ventana[j][l])
+for k in xrange(n_clusters):
+    for j in xrange(len(clusters_ventana)-1):
+        for l in xrange(n_clusters):
+            c[k,j,l]=a[0]&b[l,j]
+for k in xrange(n_clusters):
+    for j in xrange(len(clusters_ventana)-1):
+        for l in xrange(n_clusters):
+            f[k,j,l]=len(c[k,j,l])
+
+freq_indexes=[ [] for i in repeat(None,n_clusters)]
+for k in xrange(n_clusters):
+    for j in xrange(len(clusters_ventana)-1):
+        thing=np.argwhere(f[k,j]==np.amax(f[k,j]))
+        another_thing=list()
+        for equis in xrange(len(thing)):
+            another_thing.append(thing[equis][0])
+        freq_indexes[k].append(another_thing)
+
+
+
+
+
+#>>> winner = np.argwhere(list == np.amax(list))
+#http://stackoverflow.com/questions/17568612/how-to-make-numpy-argmax-return-all-occurences-of-the-maximum
+
+# error_df.to_csv('errores_3K')
+# clusters.to_csv('KMeans_3K')
