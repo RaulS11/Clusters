@@ -2,6 +2,7 @@ __author__ = 'raul'
 
 from math import log #Se utiliza para calcular los rendimientos logaritmicos
 from itertools import repeat
+from collections import Counter #Para encontrar la moda
 import pandas as pd
 from sklearn.cluster import KMeans
 import numpy as np
@@ -124,6 +125,23 @@ def frecuencia(clusters_ventana, n_clusters=3):
             freq_indexes[k].append(another_thing)
     return freq_indexes
 
+def criss_cross(matriz_freq, matriz_len, c):
+    matriz_freq_original=matriz_freq.copy()
+    for j in xrange(matriz_freq.shape[1]):
+        for k in xrange(matriz_freq.shape[0]):
+            if k != c:
+                if matriz_len[c,j]>matriz_len[k,j]:
+                    subset=matriz_freq_original[c,j]&matriz_freq_original[k,j]
+                    matriz_freq[c,j]=matriz_freq[c,j]-subset
+                elif matriz_len[c,j]<matriz_len[k,j]:
+                    subset=matriz_freq_original[c,j]&matriz_freq_original[k,j]
+                    matriz_freq[k,j]=matriz_freq[k,j]-subset
+                elif matriz_len[c,j]==matriz_len[k,j]:
+                    subset=matriz_freq_original[c,j]&matriz_freq_original[k,j]
+                    matriz_freq[c,j]=matriz_freq[c,j]-subset
+                    matriz_freq[k,j]=matriz_freq[k,j]-subset
+    return matriz_freq
+
 precios=pd.read_excel('OPIIFPrecios2.xlsx')
 precios=precios.convert_objects(convert_numeric=True)
 precios['Fecha']=pd.to_datetime(precios['Fecha'])
@@ -162,6 +180,7 @@ for j in xrange(clusters.shape[1]):
     clusters_ventana.append(window_clusters(clusters,j,n_clusters))
 
 freq=frecuencia(clusters_ventana,n_clusters)
+
 matriz_freq=np.empty([n_clusters,len(clusters_ventana)-1], dtype=set)
 matriz_len=np.empty([n_clusters,len(clusters_ventana)-1], dtype=set)
 for i in xrange(n_clusters):
@@ -169,25 +188,43 @@ for i in xrange(n_clusters):
         matriz_freq[i,j]=set(freq[i][j])
         matriz_len[i,j]=len(matriz_freq[i,j])
 
+#Hacer una funcion en donde dentro vayas moviendo las ks con un for pero que le vayas insertando la k, k-esima.
+for k in xrange(n_clusters):
+    matriz_freq=criss_cross(matriz_freq,matriz_len,k)
 
-#Errores----------------------------------------------
-#No se eliminan las cosas de la ventana 3.
-#Cuando K=2, no se elimina el k-esimo de la ventana 1.
+#Sigue checar que sets son nulos y eliminar esas ventanas
+clusters.columns=list(xrange(clusters.shape[1]))
+new_len=pd.DataFrame(matriz_len)
+for j in xrange(matriz_freq.shape[1]):
+    for k in xrange(matriz_freq.shape[0]):
+        new_len.iloc[k][j]=len(matriz_freq[k,j])
+suma=new_len.sum()
+for j in xrange(len(suma)):
+    if suma[j]==0:
+        clusters=clusters.drop(j+1,axis=1)
 
-matriz_freq_original=matriz_freq.copy()
-for j in xrange(len(clusters_ventana)-1):
-    for k in xrange(1,n_clusters):
-        if matriz_len[k,j]>matriz_len[k-1,j]:
-            subset=matriz_freq_original[k,j]&matriz_freq_original[k-1,j]
-            matriz_freq[k,j]=matriz_freq[k,j]-subset
-        elif matriz_len[k,j]<matriz_len[k-1,j]:
-            subset=matriz_freq_original[k,j]&matriz_freq_original[k-1,j]
-            matriz_freq[k-1,j]=matriz_freq[k-1,j]-subset
-        elif matriz_len[k,j]==matriz_len[k-1,j]:
-            subset=matriz_freq_original[k,j]&matriz_freq_original[k-1,j]
-            matriz_freq[k-1,j]=matriz_freq[k-1,j]-subset
-            matriz_freq[k,j]=matriz_freq[k,j]-subset
 
+#Ahora falta cambiar los valores de las k en las ventanas j=1 hasta num_ventanas por las k a las que se parecen:
+
+clusters_original=clusters.copy()
+for j in clusters.columns:
+    for k in xrange(n_clusters):
+        for i in xrange(len(clusters)):
+            similar_k=list(matriz_freq[k,j-1])
+            similar_clusters=clusters_original.ix[:,j].isin(similar_k)
+            if similar_clusters[i]==True:
+                clusters.iloc[i][j]=k
+
+clusters_moda=list()
+for i in xrange(len(clusters)):
+    temp=Counter(clusters.ix[i,:])
+    clusters_moda.append(temp.most_common(1))
+    clusters_moda[i]=clusters_moda[i][0][0]
+temp=df
+temp=temp.drop('Fecha')
+temp=temp.drop(xrange(1,df.shape[1]+1),axis=1)
+
+modas=pd.DataFrame(clusters_moda,index=temp.index, columns=['Cluster'])
 
 
 # error_df.to_csv('errores_3K')
